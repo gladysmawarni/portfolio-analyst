@@ -1,9 +1,11 @@
 import pandas as pd
+import os
 import yfinance as yf
 from datetime import date
 import numpy as np
-import matplotlib.pyplot as plt
 import streamlit as st
+from utils import ( get_fx_rate, compute_moving_averages, plot_moving_averages, compute_volatility, plot_volatility_bar_chart, 
+                   plot_pe_bar_chart, plot_beta_bar_chart, plot_sharpe_ratios, compute_rsi, plot_rsi_values, compute_macd,plot_macd_crossover )
 
 st.set_page_config(page_title="Financial Performance")
 
@@ -17,7 +19,8 @@ st.markdown("This tool allows you to upload a CSV of your financial assets and v
 st.markdown("### 📁 Browse and Upload CSV")
 uploaded_file = st.file_uploader("Upload your portfolio CSV", type=["csv"])
 
-    
+# Openai Client
+os.environ['OPENAI_API_KEY'] = st.secrets['OPENAI_API_KEY']
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
@@ -27,19 +30,6 @@ if uploaded_file:
 
     #### ----- Tab 1: Gains ----- ####
     with tab1:
-        # Fetch FX rate for USD → EUR
-        def get_fx_rate(from_currency: str, to_currency: str = 'EUR') -> float:
-            """
-            Get live FX rate from Yahoo. Returns 1.0 if from/to are the same.
-            """
-            if from_currency == to_currency:
-                return 1.0
-            pair = f"{from_currency}{to_currency}=X"
-            try:
-                fx_data = yf.Ticker(pair).history(period="1d")
-                return fx_data['Close'].iloc[-1]
-            except Exception:
-                return np.nan
         
         # Cache FX rates with EUR = 1.0
         fx_cache = {}
@@ -100,8 +90,183 @@ if uploaded_file:
         st.markdown(f"### 📋 Snapshot as of {today} (all converted to EUR)")
         st.dataframe(report.style.format(precision=2))
 
+
+    ### Tab 2: Stock Analysis
+    # --- Subtabs ---
+    with tab2:
+        subtab1, subtab2, subtab3, subtab4, subtab5, subtab6, subtab7 = st.tabs(["Moving Averages", "Volatility", "P/E Ratio", "Beta", "Sharpe Ratio", "RSI", "MACD"])
+
+        ## --- Moving Averages ---
+        with subtab1:
+            st.markdown('### 📈 Moving Averages')
+            # plot for all tickers in my portfolio
+            for ticker in df['Ticker']:
+                hist = compute_moving_averages(ticker)
+                if hist is not None:
+                    plot_moving_averages(hist, ticker)
+        
+        ## --- Volatility ---
+        with subtab2:
+            st.markdown('### 📊 30-Day Rolling Volatility (Annualized)')
+
+            # Portfolio tickers
+            tickers = df['Ticker'].tolist()
+
+            # Store results
+            volatility_results = {}
+
+            for ticker in tickers:
+                result = compute_volatility(ticker)
+                if result:
+                    latest_vol, rolling_vol, hist = result
+                    volatility_results[ticker] = {
+                        "latest_vol": latest_vol,
+                        "rolling_vol": rolling_vol,
+                        "price_history": hist
+                    }
+
+            plot_volatility_bar_chart(volatility_results) 
+        
+        ## -- P/E Ratio --
+        with subtab3:
+            st.markdown('### 💰 P/E Ratios Across Portfolio')
+
+            pe_ratios = {}
+            for ticker in df['Ticker']:
+                try:
+                    info = yf.Ticker(ticker).info
+                    pe = info.get('trailingPE', np.nan)
+
+                    if np.isnan(pe):
+                        st.warning(f"⚠ {ticker}: No P/E ratio (possibly negative earnings or ETF)")
+                    # else:
+                    #     st.success(f"📊 {ticker} - P/E Ratio: {pe:.2f}")
+
+                    pe_ratios[ticker] = pe
+
+                except Exception as e:
+                    st.error(f"❌ Error fetching P/E for {ticker}: {e}")
+                    pe_ratios[ticker] = np.nan
+            
+            plot_pe_bar_chart(pe_ratios)
+       
+        ## -- BETA --
+        with subtab4:
+            st.markdown('### 📊 Beta Values Across Portfolio')
+
+            beta_values = {}
+            for ticker in tickers:
+                try:
+                    info = yf.Ticker(ticker).info
+                    beta = info.get('beta', np.nan)
+
+                    if np.isnan(beta):
+                        st.warning(f"⚠ {ticker} has no Beta value.")
+                    # else:
+                    #     st.success(f"📊 {ticker} - Beta: {beta:.2f}")
+
+                    beta_values[ticker] = beta
+
+                except Exception as e:
+                    st.error(f"❌ Error fetching Beta for {ticker}: {e}")
+                    beta_values[ticker] = np.nan
+
+            plot_beta_bar_chart(beta_values)
+        
+        ## -- Sharpe Ratio --
+        with subtab5:
+            st.markdown('### 📊 Sharpe Ratios Across Portfolio')
+
+            sharpe_ratios = {}
+            risk_free_rate = 0.04  # Assume 2% annualized risk-free rate
+
+            for ticker in tickers:
+                try:
+                    # Fetch price history (1 year)
+                    hist = yf.Ticker(ticker).history(period="1y")
+                    if hist.empty:
+                        st.warning(f"⚠ No price data for {ticker}.")
+                        sharpe_ratios[ticker] = np.nan
+                        continue
+
+                    # Daily returns
+                    daily_returns = hist['Close'].pct_change().dropna()
+
+                    # Annualized return & volatility
+                    avg_daily_return = daily_returns.mean()
+                    annualized_return = avg_daily_return * 252
+                    volatility = daily_returns.std() * np.sqrt(252)
+
+                    # Sharpe ratio
+                    sharpe = (annualized_return - risk_free_rate) / volatility if volatility != 0 else np.nan
+
+                    sharpe_ratios[ticker] = sharpe
+                    # st.success(f"📈 {ticker} - Sharpe Ratio: {sharpe:.2f}")
+
+                except Exception as e:
+                    st.error(f"⚠ Error computing Sharpe for {ticker}: {e}")
+                    sharpe_ratios[ticker] = np.nan
+
+            plot_sharpe_ratios(sharpe_ratios)
+
+        with subtab6:
+            st.markdown('### 🔄 RSI (14-day) Across Portfolio')
+
+            rsi_values = {}
+
+            for ticker in df['Ticker']:
+                try:
+                    hist = yf.Ticker(ticker).history(period="3mo")
+                    if hist.empty:
+                        print(f"⚠ No price data for {ticker}.")
+                        rsi_values[ticker] = np.nan
+                        continue
+
+                    close_prices = hist['Close']
+                    rsi_series = compute_rsi(close_prices)
+                    latest_rsi = rsi_series.iloc[-1]
+
+                    rsi_values[ticker] = latest_rsi
+                    # st.success(f"🔄 {ticker} - RSI: {latest_rsi:.2f}")
+
+                except Exception as e:
+                    st.error(f"⚠ Error computing RSI for {ticker}: {e}")
+                    rsi_values[ticker] = np.nan
+
+            plot_rsi_values(rsi_values)
+        
+        with subtab7:
+            st.markdown('### 📊 MACD Crossover Signals (Latest)')
+
+            macd_crossovers = {}
+
+            # Loop through portfolio
+            for ticker in df['Ticker']:
+                try:
+                    hist = yf.Ticker(ticker).history(period="3mo")
+                    if hist.empty:
+                        st.error(f"⚠ No price data for {ticker}.")
+                        macd_crossovers[ticker] = None
+                        continue
+
+                    close_prices = hist['Close']
+                    macd_val, signal_val, crossover = compute_macd(close_prices)
+
+                    macd_crossovers[ticker] = {
+                        "MACD": macd_val,
+                        "Signal": signal_val,
+                        "Crossover": crossover
+                    }
+
+                    # st.markdown(f"📈 {ticker} - MACD: {macd_val:.2f}, Signal: {signal_val:.2f}, Crossover: {crossover}")
+
+                except Exception as e:
+                    st.error(f"⚠ Error computing MACD for {ticker}: {e}")
+                    macd_crossovers[ticker] = None
+            
+            plot_macd_crossover(macd_crossovers)
     
-     ## --- Tab 3: Stock Updates ---
+    ### --- Tab 3: Stock Updates ---
     with tab3:
         # --- Any asset to update ---
         update = st.radio("Do you have any assets to update?", ("No", "Yes"), horizontal=True)
