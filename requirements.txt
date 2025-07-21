@@ -1,0 +1,6 @@
+pandas
+numpy
+yfinance
+numpy
+streamlit
+langchain_openai
