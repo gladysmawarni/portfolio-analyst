@@ -4,3 +4,4 @@ yfinance
 numpy
 streamlit
 langchain_openai
+plotly
