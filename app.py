@@ -185,7 +185,6 @@ if  st.session_state.data_loaded == True:
 
         if st.button('Analyze'):
             flag = True
-            print(st.session_state.df['Ticker'])
 
 
     ### Tab 3: Stock Analysis
@@ -224,7 +223,7 @@ if  st.session_state.data_loaded == True:
                         }
 
                 plot_volatility_bar_chart(volatility_results) 
-                print(st.session_state.df['Ticker'])
+                
             
             ## -- P/E Ratio --
             with subtab3:
