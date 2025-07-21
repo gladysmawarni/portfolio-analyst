@@ -23,18 +23,28 @@ uploaded_file = st.file_uploader("Upload your portfolio CSV", type=["csv"])
 # Openai Client
 os.environ['OPENAI_API_KEY'] = st.secrets['OPENAI_API_KEY']
 
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
+# session state for dataframe
+if 'data_loaded' not in st.session_state:
+    st.session_state.data_loaded = False
 
+
+if uploaded_file and st.session_state.data_loaded == False:
+    st.session_state.df = pd.read_csv(uploaded_file)
+    st.session_state.data_loaded = True
+
+if  st.session_state.data_loaded == True:
      # --- Tabs ---
-    tab1, tab2, tab3, tab4 = st.tabs(["Gains", "Stock Analysis", "Stock Updates", "AI Recommendation"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Gains", "Stock Updates", "Stock Analysis", "AI Recommendation"])
+
+    # -- Flag to start analysing --
+    flag = False
 
     #### ----- Tab 1: Gains ----- ####
     with tab1:
         
         # Cache FX rates with EUR = 1.0
         fx_cache = {}
-        for ccy in df['Currency Yahoo'].unique():
+        for ccy in st.session_state.df['Currency Yahoo'].unique():
             if ccy == 'EUR':
                 fx_cache[ccy] = 1.0  # no conversion needed
             else:
@@ -59,23 +69,23 @@ if uploaded_file:
         # --- CALCULATIONS ---------------------------------------------
         today = date.today()
 
-        df['Price Today (EUR)']       = df.apply(get_price_eur, axis=1)
-        df['Value Today (EUR)']       = df['Units'] * df['Price Today (EUR)']
+        st.session_state.df['Price Today (EUR)']       = st.session_state.df.apply(get_price_eur, axis=1)
+        st.session_state.df['Value Today (EUR)']       = st.session_state.df['Units'] * st.session_state.df['Price Today (EUR)']
 
-        df['Gain € Since Last']       = df['Value Today (EUR)'] - df['Value Last Update']
-        df['Gain € Since Purchase']   = df['Value Today (EUR)'] - df['Units'] * df['Purchase Price']
+        st.session_state.df['Gain € Since Last']       = st.session_state.df['Value Today (EUR)'] - st.session_state.df['Value Last Update']
+        st.session_state.df['Gain € Since Purchase']   = st.session_state.df['Value Today (EUR)'] - st.session_state.df['Units'] * st.session_state.df['Purchase Price']
 
-        df['Gain % Since Last']       = df['Gain € Since Last']     / df['Value Last Update']                      * 100
-        df['Gain % Since Purchase']   = df['Gain € Since Purchase'] / (df['Units'] * df['Purchase Price'])         * 100
+        st.session_state.df['Gain % Since Last']       = st.session_state.df['Gain € Since Last']     / st.session_state.df['Value Last Update']                      * 100
+        st.session_state.df['Gain % Since Purchase']   = st.session_state.df['Gain € Since Purchase'] / (st.session_state.df['Units'] * st.session_state.df['Purchase Price'])         * 100
 
         # --- Totals Row -----------------------------------------------
         totals = {
             'Asset'                    : 'TOTAL',
             'Ticker'                   : '',
-            'Gain € Since Last'        : df['Gain € Since Last'].sum(),
-            'Gain % Since Last'        : df['Gain € Since Last'].sum()     / df['Value Last Update'].sum()           * 100,
-            'Gain € Since Purchase'    : df['Gain € Since Purchase'].sum(),
-            'Gain % Since Purchase'    : df['Gain € Since Purchase'].sum() / (df['Units']*df['Purchase Price']).sum()* 100,
+            'Gain € Since Last'        : st.session_state.df['Gain € Since Last'].sum(),
+            'Gain % Since Last'        : st.session_state.df['Gain € Since Last'].sum()     / st.session_state.df['Value Last Update'].sum()           * 100,
+            'Gain € Since Purchase'    : st.session_state.df['Gain € Since Purchase'].sum(),
+            'Gain % Since Purchase'    : st.session_state.df['Gain € Since Purchase'].sum() / (st.session_state.df['Units']*st.session_state.df['Purchase Price']).sum()* 100,
         }
 
         # Columns to show
@@ -85,206 +95,31 @@ if uploaded_file:
             'Gain € Since Purchase', 'Gain % Since Purchase'
         ]
 
-        report = pd.concat([df[report_cols], pd.DataFrame([totals])], ignore_index=True)
+        report = pd.concat([st.session_state.df[report_cols], pd.DataFrame([totals])], ignore_index=True)
 
         # --- Display Report in Streamlit ---------------------------------------------
         st.markdown(f"### 📋 Snapshot as of {today} (all converted to EUR)")
         st.dataframe(report.style.format(precision=2))
 
 
-    ### Tab 2: Stock Analysis
-    # --- Subtabs ---
+    ### --- Tab 2: Stock Updates ---
     with tab2:
-        subtab1, subtab2, subtab3, subtab4, subtab5, subtab6, subtab7 = st.tabs(["Moving Averages", "Volatility", "P/E Ratio", "Beta", "Sharpe Ratio", "RSI", "MACD"])
-
-        ## --- Moving Averages ---
-        with subtab1:
-            st.markdown('### 📈 Moving Averages')
-            # plot for all tickers in my portfolio
-            for ticker in df['Ticker']:
-                hist = compute_moving_averages(ticker, True)
-                if hist is not None:
-                    plot_moving_averages(hist, ticker)
-        
-        ## --- Volatility ---
-        with subtab2:
-            st.markdown('### 📊 30-Day Rolling Volatility (Annualized)')
-
-            # Portfolio tickers
-            tickers = df['Ticker'].tolist()
-
-            # Store results
-            volatility_results = {}
-
-            for ticker in tickers:
-                result = compute_volatility(ticker)
-                if result:
-                    latest_vol, rolling_vol, hist = result
-                    volatility_results[ticker] = {
-                        "latest_vol": latest_vol,
-                        "rolling_vol": rolling_vol,
-                        "price_history": hist
-                    }
-
-            plot_volatility_bar_chart(volatility_results) 
-        
-        ## -- P/E Ratio --
-        with subtab3:
-            st.markdown('### 💰 P/E Ratios Across Portfolio')
-
-            pe_ratios = {}
-            for ticker in df['Ticker']:
-                try:
-                    info = yf.Ticker(ticker).info
-                    pe = info.get('trailingPE', np.nan)
-
-                    if np.isnan(pe):
-                        st.warning(f"⚠ {ticker}: No P/E ratio (possibly negative earnings or ETF)")
-                    # else:
-                    #     st.success(f"📊 {ticker} - P/E Ratio: {pe:.2f}")
-
-                    pe_ratios[ticker] = pe
-
-                except Exception as e:
-                    st.error(f"❌ Error fetching P/E for {ticker}: {e}")
-                    pe_ratios[ticker] = np.nan
-            
-            plot_pe_bar_chart(pe_ratios)
-       
-        ## -- BETA --
-        with subtab4:
-            st.markdown('### 📊 Beta Values Across Portfolio')
-
-            beta_values = {}
-            for ticker in tickers:
-                try:
-                    info = yf.Ticker(ticker).info
-                    beta = info.get('beta', np.nan)
-
-                    if np.isnan(beta):
-                        st.warning(f"⚠ {ticker} has no Beta value.")
-                    # else:
-                    #     st.success(f"📊 {ticker} - Beta: {beta:.2f}")
-
-                    beta_values[ticker] = beta
-
-                except Exception as e:
-                    st.error(f"❌ Error fetching Beta for {ticker}: {e}")
-                    beta_values[ticker] = np.nan
-
-            plot_beta_bar_chart(beta_values)
-        
-        ## -- Sharpe Ratio --
-        with subtab5:
-            st.markdown('### 📊 Sharpe Ratios Across Portfolio')
-
-            sharpe_ratios = {}
-            risk_free_rate = 0.04  # Assume 2% annualized risk-free rate
-
-            for ticker in tickers:
-                try:
-                    # Fetch price history (1 year)
-                    hist = yf.Ticker(ticker).history(period="1y")
-                    if hist.empty:
-                        st.warning(f"⚠ No price data for {ticker}.")
-                        sharpe_ratios[ticker] = np.nan
-                        continue
-
-                    # Daily returns
-                    daily_returns = hist['Close'].pct_change().dropna()
-
-                    # Annualized return & volatility
-                    avg_daily_return = daily_returns.mean()
-                    annualized_return = avg_daily_return * 252
-                    volatility = daily_returns.std() * np.sqrt(252)
-
-                    # Sharpe ratio
-                    sharpe = (annualized_return - risk_free_rate) / volatility if volatility != 0 else np.nan
-
-                    sharpe_ratios[ticker] = sharpe
-                    # st.success(f"📈 {ticker} - Sharpe Ratio: {sharpe:.2f}")
-
-                except Exception as e:
-                    st.error(f"⚠ Error computing Sharpe for {ticker}: {e}")
-                    sharpe_ratios[ticker] = np.nan
-
-            plot_sharpe_ratios(sharpe_ratios)
-
-        with subtab6:
-            st.markdown('### 🔄 RSI (14-day) Across Portfolio')
-
-            rsi_values = {}
-
-            for ticker in df['Ticker']:
-                try:
-                    hist = yf.Ticker(ticker).history(period="3mo")
-                    if hist.empty:
-                        print(f"⚠ No price data for {ticker}.")
-                        rsi_values[ticker] = np.nan
-                        continue
-
-                    close_prices = hist['Close']
-                    rsi_series = compute_rsi(close_prices)
-                    latest_rsi = rsi_series.iloc[-1]
-
-                    rsi_values[ticker] = latest_rsi
-                    # st.success(f"🔄 {ticker} - RSI: {latest_rsi:.2f}")
-
-                except Exception as e:
-                    st.error(f"⚠ Error computing RSI for {ticker}: {e}")
-                    rsi_values[ticker] = np.nan
-
-            plot_rsi_values(rsi_values)
-        
-        with subtab7:
-            st.markdown('### 📊 MACD Crossover Signals (Latest)')
-
-            macd_crossovers = {}
-
-            # Loop through portfolio
-            for ticker in df['Ticker']:
-                try:
-                    hist = yf.Ticker(ticker).history(period="3mo")
-                    if hist.empty:
-                        st.error(f"⚠ No price data for {ticker}.")
-                        macd_crossovers[ticker] = None
-                        continue
-
-                    close_prices = hist['Close']
-                    macd_val, signal_val, crossover = compute_macd(close_prices)
-
-                    macd_crossovers[ticker] = {
-                        "MACD": macd_val,
-                        "Signal": signal_val,
-                        "Crossover": crossover
-                    }
-
-                    # st.markdown(f"📈 {ticker} - MACD: {macd_val:.2f}, Signal: {signal_val:.2f}, Crossover: {crossover}")
-
-                except Exception as e:
-                    st.error(f"⚠ Error computing MACD for {ticker}: {e}")
-                    macd_crossovers[ticker] = None
-            
-            plot_macd_crossover(macd_crossovers)
-    
-    ### --- Tab 3: Stock Updates ---
-    with tab3:
         # --- Any asset to update ---
         update = st.radio("Do you have any assets to update?", ("No", "Yes"), horizontal=True)
 
         # if yes
         if update == 'Yes':
             st.markdown("### 🔧 Update Asset Details")
-            selected_asset = st.selectbox("Which asset was updated?", df['Asset'].tolist())
+            selected_asset = st.selectbox("Which asset was updated?", st.session_state.df['Asset'].tolist())
             extra_units = st.number_input("How many new units were bought?", min_value=0.0, step=0.1)
             purchase_price = st.number_input("What was the purchase price per unit (EUR)?", min_value=0.0, step=0.01)
 
             if st.button("Update Asset"):
                 if selected_asset and extra_units > 0 and purchase_price > 0:
                     # Find the asset row
-                    idx = df[df['Asset'] == selected_asset].index[0]
-                    old_units = df.at[idx, 'Units']
-                    old_avg_price = df.at[idx, 'Purchase Price']
+                    idx = st.session_state.df[st.session_state.df['Asset'] == selected_asset].index[0]
+                    old_units = st.session_state.df.at[idx, 'Units']
+                    old_avg_price = st.session_state.df.at[idx, 'Purchase Price']
 
                     # Recalculate
                     total_cost = (old_units * old_avg_price) + (extra_units * purchase_price)
@@ -292,8 +127,8 @@ if uploaded_file:
                     new_avg_price = total_cost / total_units if total_units != 0 else 0
 
                     # Update DataFrame
-                    df.at[idx, 'Units'] = total_units
-                    df.at[idx, 'Purchase Price'] = new_avg_price
+                    st.session_state.df.at[idx, 'Units'] = total_units
+                    st.session_state.df.at[idx, 'Purchase Price'] = new_avg_price
 
                     st.success(f"✅ Updated {selected_asset}: {total_units:.4f} units @ avg price €{new_avg_price:.2f}")
                 else:
@@ -335,10 +170,11 @@ if uploaded_file:
                         }
 
                         # Append new row to session DataFrame
-                        df = pd.concat(
-                            [df, pd.DataFrame([new_row])],
+                        st.session_state.df = pd.concat(
+                            [st.session_state.df, pd.DataFrame([new_row])],
                             ignore_index=True
-                        )
+                        )  
+
 
                         st.success(f"✅ Added {asset_name} to portfolio.")
                     else:
@@ -347,50 +183,235 @@ if uploaded_file:
                 else:
                     st.error("❌ Please fill in all fields with valid values.")
 
-    with tab4:
-        st.markdown("### 🤖 Personalized AI Recommendation")
+        if st.button('Save'):
+            flag = True
+            print(st.session_state.df['Ticker'])
 
-        llm = ChatOpenAI(
-            model="gpt-4.1",
-            temperature=0)
+
+    ### Tab 3: Stock Analysis
+    with tab3:
+        # --- Subtabs ---
+        subtab1, subtab2, subtab3, subtab4, subtab5, subtab6, subtab7 = st.tabs(["Moving Averages", "Volatility", "P/E Ratio", "Beta", "Sharpe Ratio", "RSI", "MACD"])
+
+        if flag == True:
+            ## --- Moving Averages ---
+            with subtab1:
+                st.markdown('### 📈 Moving Averages')
+                # plot for all tickers in my portfolio
+                for ticker in st.session_state.df['Ticker']:
+                    hist = compute_moving_averages(ticker, True)
+                    if hist is not None:
+                        plot_moving_averages(hist, ticker)
+            
+            ## --- Volatility ---
+            with subtab2:
+                st.markdown('### 📊 30-Day Rolling Volatility (Annualized)')
+
+                # Portfolio tickers
+                tickers = st.session_state.df['Ticker'].tolist()
+
+                # Store results
+                volatility_results = {}
+
+                for ticker in tickers:
+                    result = compute_volatility(ticker)
+                    if result:
+                        latest_vol, rolling_vol, hist = result
+                        volatility_results[ticker] = {
+                            "latest_vol": latest_vol,
+                            "rolling_vol": rolling_vol,
+                            "price_history": hist
+                        }
+
+                plot_volatility_bar_chart(volatility_results) 
+                print(st.session_state.df['Ticker'])
+            
+            ## -- P/E Ratio --
+            with subtab3:
+                st.markdown('### 💰 P/E Ratios Across Portfolio')
+
+                pe_ratios = {}
+                for ticker in st.session_state.df['Ticker']:
+                    try:
+                        info = yf.Ticker(ticker).info
+                        pe = info.get('trailingPE', np.nan)
+
+                        if np.isnan(pe):
+                            st.warning(f"⚠ {ticker}: No P/E ratio (possibly negative earnings or ETF)")
+                        # else:
+                        #     st.success(f"📊 {ticker} - P/E Ratio: {pe:.2f}")
+
+                        pe_ratios[ticker] = pe
+
+                    except Exception as e:
+                        st.error(f"❌ Error fetching P/E for {ticker}: {e}")
+                        pe_ratios[ticker] = np.nan
+                
+                plot_pe_bar_chart(pe_ratios)
         
-        # Combine all KPI dictionaries into a single DataFrame
-        kpi_df = pd.DataFrame({
-            'Ticker': df['Ticker'],
-            'Asset': df['Asset'],
-            'Price Today': df['Price Today (EUR)'],
-            'MA-50': [compute_moving_averages(t, False)['Close'].rolling(50).mean().iloc[-1] for t in df['Ticker']],
-            'MA-100': [compute_moving_averages(t,False)['Close'].rolling(100).mean().iloc[-1] for t in df['Ticker']],
-            'MA-200': [compute_moving_averages(t,False)['Close'].rolling(200).mean().iloc[-1] for t in df['Ticker']],
-            'Volatility (30d)': [volatility_results[t]['latest_vol'] for t in df['Ticker']],
-            'P/E Ratio': [pe_ratios.get(t, np.nan) for t in df['Ticker']],
-            'Beta': [beta_values.get(t, np.nan) for t in df['Ticker']],
-            'Sharpe Ratio': [sharpe_ratios.get(t, np.nan) for t in df['Ticker']],
-            'RSI': [rsi_values.get(t, np.nan) for t in df['Ticker']],
-            'MACD Crossover': [macd_crossovers.get(t, {}).get('Crossover', 'N/A') for t in df['Ticker']]
-        })
+            ## -- BETA --
+            with subtab4:
+                st.markdown('### 📊 Beta Values Across Portfolio')
 
-        st.write('Portfolio Summary')
-        st.dataframe(kpi_df)
+                beta_values = {}
+                for ticker in tickers:
+                    try:
+                        info = yf.Ticker(ticker).info
+                        beta = info.get('beta', np.nan)
 
-        messages = [
-            (
-                "system",
-                """
-                You are a portfolio analyst.
+                        if np.isnan(beta):
+                            st.warning(f"⚠ {ticker} has no Beta value.")
+                        # else:
+                        #     st.success(f"📊 {ticker} - Beta: {beta:.2f}")
 
-                For every ticker:
-                • Summarise key strengths & risks based on MA vs price, volatility, P/E, Beta, Sharpe, RSI, MACD.
-                • Flag momentum signals: RSI (>70 overbought, <30 oversold) and MACD crossovers.
-                • Recommend: 'Buy', 'Hold', or 'Reduce', with 1–2 line rationale.
+                        beta_values[ticker] = beta
 
-                Finish with a brief overall portfolio note.
-                Return the answer in a markdown format, without specifying it is markdown.
-                """,
+                    except Exception as e:
+                        st.error(f"❌ Error fetching Beta for {ticker}: {e}")
+                        beta_values[ticker] = np.nan
+
+                plot_beta_bar_chart(beta_values)
+            
+            ## -- Sharpe Ratio --
+            with subtab5:
+                st.markdown('### 📊 Sharpe Ratios Across Portfolio')
+
+                sharpe_ratios = {}
+                risk_free_rate = 0.04  # Assume 2% annualized risk-free rate
+
+                for ticker in tickers:
+                    try:
+                        # Fetch price history (1 year)
+                        hist = yf.Ticker(ticker).history(period="1y")
+                        if hist.empty:
+                            st.warning(f"⚠ No price data for {ticker}.")
+                            sharpe_ratios[ticker] = np.nan
+                            continue
+
+                        # Daily returns
+                        daily_returns = hist['Close'].pct_change().dropna()
+
+                        # Annualized return & volatility
+                        avg_daily_return = daily_returns.mean()
+                        annualized_return = avg_daily_return * 252
+                        volatility = daily_returns.std() * np.sqrt(252)
+
+                        # Sharpe ratio
+                        sharpe = (annualized_return - risk_free_rate) / volatility if volatility != 0 else np.nan
+
+                        sharpe_ratios[ticker] = sharpe
+                        # st.success(f"📈 {ticker} - Sharpe Ratio: {sharpe:.2f}")
+
+                    except Exception as e:
+                        st.error(f"⚠ Error computing Sharpe for {ticker}: {e}")
+                        sharpe_ratios[ticker] = np.nan
+
+                plot_sharpe_ratios(sharpe_ratios)
+
+            with subtab6:
+                st.markdown('### 🔄 RSI (14-day) Across Portfolio')
+
+                rsi_values = {}
+
+                for ticker in st.session_state.df['Ticker']:
+                    try:
+                        hist = yf.Ticker(ticker).history(period="3mo")
+                        if hist.empty:
+                            print(f"⚠ No price data for {ticker}.")
+                            rsi_values[ticker] = np.nan
+                            continue
+
+                        close_prices = hist['Close']
+                        rsi_series = compute_rsi(close_prices)
+                        latest_rsi = rsi_series.iloc[-1]
+
+                        rsi_values[ticker] = latest_rsi
+                        # st.success(f"🔄 {ticker} - RSI: {latest_rsi:.2f}")
+
+                    except Exception as e:
+                        st.error(f"⚠ Error computing RSI for {ticker}: {e}")
+                        rsi_values[ticker] = np.nan
+
+                plot_rsi_values(rsi_values)
+            
+            with subtab7:
+                st.markdown('### 📊 MACD Crossover Signals (Latest)')
+
+                macd_crossovers = {}
+
+                # Loop through portfolio
+                for ticker in st.session_state.df['Ticker']:
+                    try:
+                        hist = yf.Ticker(ticker).history(period="3mo")
+                        if hist.empty:
+                            st.error(f"⚠ No price data for {ticker}.")
+                            macd_crossovers[ticker] = None
+                            continue
+
+                        close_prices = hist['Close']
+                        macd_val, signal_val, crossover = compute_macd(close_prices)
+
+                        macd_crossovers[ticker] = {
+                            "MACD": macd_val,
+                            "Signal": signal_val,
+                            "Crossover": crossover
+                        }
+
+                        # st.markdown(f"📈 {ticker} - MACD: {macd_val:.2f}, Signal: {signal_val:.2f}, Crossover: {crossover}")
+
+                    except Exception as e:
+                        st.error(f"⚠ Error computing MACD for {ticker}: {e}")
+                        macd_crossovers[ticker] = None
+                
+                plot_macd_crossover(macd_crossovers)
+        
+    
+
+    with tab4:
+        if flag == True:
+            st.markdown("### 🤖 Personalized AI Recommendation")
+
+            llm = ChatOpenAI(
+                model="gpt-4.1",
+                temperature=0)
+            
+            # Combine all KPI dictionaries into a single DataFrame
+            kpi_df = pd.DataFrame({
+                'Ticker': st.session_state.df['Ticker'],
+                'Asset': st.session_state.df['Asset'],
+                'Price Today': st.session_state.df['Price Today (EUR)'],
+                'MA-50': [compute_moving_averages(t, False)['Close'].rolling(50).mean().iloc[-1] for t in st.session_state.df['Ticker']],
+                'MA-100': [compute_moving_averages(t,False)['Close'].rolling(100).mean().iloc[-1] for t in st.session_state.df['Ticker']],
+                'MA-200': [compute_moving_averages(t,False)['Close'].rolling(200).mean().iloc[-1] for t in st.session_state.df['Ticker']],
+                'Volatility (30d)': [volatility_results[t]['latest_vol'] for t in st.session_state.df['Ticker']],
+                'P/E Ratio': [pe_ratios.get(t, np.nan) for t in st.session_state.df['Ticker']],
+                'Beta': [beta_values.get(t, np.nan) for t in st.session_state.df['Ticker']],
+                'Sharpe Ratio': [sharpe_ratios.get(t, np.nan) for t in st.session_state.df['Ticker']],
+                'RSI': [rsi_values.get(t, np.nan) for t in st.session_state.df['Ticker']],
+                'MACD Crossover': [macd_crossovers.get(t, {}).get('Crossover', 'N/A') for t in st.session_state.df['Ticker']]
+            })
+
+            st.write('Portfolio Summary')
+            st.dataframe(kpi_df)
+
+            messages = [
+                (
+                    "system",
+                    """
+                    You are a portfolio analyst.
+
+                    For every ticker:
+                    • Summarise key strengths & risks based on MA vs price, volatility, P/E, Beta, Sharpe, RSI, MACD.
+                    • Flag momentum signals: RSI (>70 overbought, <30 oversold) and MACD crossovers.
+                    • Recommend: 'Buy', 'Hold', or 'Reduce', with 1–2 line rationale.
+
+                    Finish with a brief overall portfolio note.
+                    Return the answer in a markdown format, without specifying it is markdown.
+                    """,
+                ),
+                ("human", kpi_df.to_string()
             ),
-            ("human", kpi_df.to_string()
-        ),
-        ]
+            ]
 
-        ai_msg = llm.invoke(messages)
-        st.markdown(ai_msg.content)
+            ai_msg = llm.invoke(messages)
+            st.markdown(ai_msg.content)
