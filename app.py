@@ -4,6 +4,7 @@ import yfinance as yf
 from datetime import date
 import numpy as np
 import streamlit as st
+from langchain_openai import ChatOpenAI
 from utils import ( get_fx_rate, compute_moving_averages, plot_moving_averages, compute_volatility, plot_volatility_bar_chart, 
                    plot_pe_bar_chart, plot_beta_bar_chart, plot_sharpe_ratios, compute_rsi, plot_rsi_values, compute_macd,plot_macd_crossover )
 
@@ -101,7 +102,7 @@ if uploaded_file:
             st.markdown('### 📈 Moving Averages')
             # plot for all tickers in my portfolio
             for ticker in df['Ticker']:
-                hist = compute_moving_averages(ticker)
+                hist = compute_moving_averages(ticker, True)
                 if hist is not None:
                     plot_moving_averages(hist, ticker)
         
@@ -345,3 +346,51 @@ if uploaded_file:
 
                 else:
                     st.error("❌ Please fill in all fields with valid values.")
+
+    with tab4:
+        st.markdown("### 🤖 Personalized AI Recommendation")
+
+        llm = ChatOpenAI(
+            model="gpt-4.1",
+            temperature=0)
+        
+        # Combine all KPI dictionaries into a single DataFrame
+        kpi_df = pd.DataFrame({
+            'Ticker': df['Ticker'],
+            'Asset': df['Asset'],
+            'Price Today': df['Price Today (EUR)'],
+            'MA-50': [compute_moving_averages(t, False)['Close'].rolling(50).mean().iloc[-1] for t in df['Ticker']],
+            'MA-100': [compute_moving_averages(t,False)['Close'].rolling(100).mean().iloc[-1] for t in df['Ticker']],
+            'MA-200': [compute_moving_averages(t,False)['Close'].rolling(200).mean().iloc[-1] for t in df['Ticker']],
+            'Volatility (30d)': [volatility_results[t]['latest_vol'] for t in df['Ticker']],
+            'P/E Ratio': [pe_ratios.get(t, np.nan) for t in df['Ticker']],
+            'Beta': [beta_values.get(t, np.nan) for t in df['Ticker']],
+            'Sharpe Ratio': [sharpe_ratios.get(t, np.nan) for t in df['Ticker']],
+            'RSI': [rsi_values.get(t, np.nan) for t in df['Ticker']],
+            'MACD Crossover': [macd_crossovers.get(t, {}).get('Crossover', 'N/A') for t in df['Ticker']]
+        })
+
+        st.write('Portfolio Summary')
+        st.dataframe(kpi_df)
+
+        messages = [
+            (
+                "system",
+                """
+                You are a portfolio analyst.
+
+                For every ticker:
+                • Summarise key strengths & risks based on MA vs price, volatility, P/E, Beta, Sharpe, RSI, MACD.
+                • Flag momentum signals: RSI (>70 overbought, <30 oversold) and MACD crossovers.
+                • Recommend: 'Buy', 'Hold', or 'Reduce', with 1–2 line rationale.
+
+                Finish with a brief overall portfolio note.
+                Return the answer in a markdown format, without specifying it is markdown.
+                """,
+            ),
+            ("human", kpi_df.to_string()
+        ),
+        ]
+
+        ai_msg = llm.invoke(messages)
+        st.markdown(ai_msg.content)

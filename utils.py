@@ -36,7 +36,7 @@ def get_history(ticker, period="1y", interval="1d"):
         return None
     
 # --- Compute moving averages ------------------------------------------
-def compute_moving_averages(ticker):
+def compute_moving_averages(ticker, print):
     """
     Fetch price data and compute 50, 100, 200-day moving averages.
     """
@@ -56,11 +56,12 @@ def compute_moving_averages(ticker):
     latest_ma100 = hist['MA100'].iloc[-1]
     latest_ma200 = hist['MA200'].iloc[-1]
 
-    st.markdown(f"#### 📊 {ticker} - Moving Averages vs Price")
-    st.markdown(f"* Price: €{latest_price:.2f}")
-    st.markdown(f"* MA-50: €{latest_ma50:.2f} ({'Above' if latest_price > latest_ma50 else 'Below'})")
-    st.markdown(f"* MA-100: €{latest_ma100:.2f} ({'Above' if latest_price > latest_ma100 else 'Below'})")
-    st.markdown(f"* MA-200: €{latest_ma200:.2f} ({'Above' if latest_price > latest_ma200 else 'Below'})")
+    if print==True:
+        st.markdown(f"#### 📊 {ticker} - Moving Averages vs Price")
+        st.markdown(f"* Price: €{latest_price:.2f}")
+        st.markdown(f"* MA-50: €{latest_ma50:.2f} ({'Above' if latest_price > latest_ma50 else 'Below'})")
+        st.markdown(f"* MA-100: €{latest_ma100:.2f} ({'Above' if latest_price > latest_ma100 else 'Below'})")
+        st.markdown(f"* MA-200: €{latest_ma200:.2f} ({'Above' if latest_price > latest_ma200 else 'Below'})")
 
     return hist
 
