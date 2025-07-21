@@ -34,7 +34,7 @@ if uploaded_file and st.session_state.data_loaded == False:
 
 if  st.session_state.data_loaded == True:
      # --- Tabs ---
-    tab1, tab2, tab3, tab4 = st.tabs(["Gains", "Stock Updates", "Stock Analysis", "AI Recommendation"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Gains", "Stock Updates", "Stock Analysis", "AI Recommendation", "Export Data"])
 
     # -- Flag to start analysing --
     flag = False
@@ -183,7 +183,7 @@ if  st.session_state.data_loaded == True:
                 else:
                     st.error("❌ Please fill in all fields with valid values.")
 
-        if st.button('Save'):
+        if st.button('Analyze'):
             flag = True
             print(st.session_state.df['Ticker'])
 
@@ -415,3 +415,17 @@ if  st.session_state.data_loaded == True:
 
             ai_msg = llm.invoke(messages)
             st.markdown(ai_msg.content)
+
+    with tab5:
+        if flag == True:
+            st.dataframe(st.session_state.df)
+            # Convert DataFrame to CSV
+            csv = st.session_state.df.to_csv(index=False).encode('utf-8')
+
+            # Download button
+            st.download_button(
+                label="📥 Download Updated Assets",
+                data=csv,
+                file_name=f"assets {date.today().strftime('%Y-%m-%d')}.csv",
+                mime='text/csv'
+            )
