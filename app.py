@@ -6,9 +6,10 @@ import numpy as np
 import streamlit as st
 from langchain_openai import ChatOpenAI
 from utils import ( get_fx_rate, compute_moving_averages, plot_moving_averages, compute_volatility, plot_volatility_bar_chart, 
-                   plot_pe_bar_chart, plot_beta_bar_chart, plot_sharpe_ratios, compute_rsi, plot_rsi_values, compute_macd,plot_macd_crossover )
+                   plot_pe_bar_chart, plot_beta_bar_chart, plot_sharpe_ratios, compute_rsi, plot_rsi_values, compute_macd,plot_macd_crossover ) # custom functions
 
-st.set_page_config(page_title="Financial Performance")
+# Tab title
+st.set_page_config(page_title="Portfolio Analyst")
 
 # Header
 st.title("📊 Financial Performance")
@@ -23,21 +24,24 @@ uploaded_file = st.file_uploader("Upload your portfolio CSV", type=["csv"])
 # Openai Client
 os.environ['OPENAI_API_KEY'] = st.secrets['OPENAI_API_KEY']
 
-# session state for dataframe
+## -- Session State -- ##
+# to check if the data is uploaded
 if 'data_loaded' not in st.session_state:
-    st.session_state.data_loaded = False
+    st.session_state.data_loaded = False  
 
-
+# save uploaded df and continue to the analysis
 if uploaded_file and st.session_state.data_loaded == False:
-    st.session_state.df = pd.read_csv(uploaded_file)
+    st.session_state.df = pd.read_csv(uploaded_file) 
     st.session_state.data_loaded = True
 
-if  st.session_state.data_loaded == True:
-     # --- Tabs ---
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Gains", "Stock Updates", "Stock Analysis", "AI Recommendation", "Export Data"])
+#  Flag to start analysing, after the user specify new assets
+if 'flag' not in st.session_state:
+    st.session_state.flag = False  
 
-    # -- Flag to start analysing --
-    flag = False
+## -- Start of Analysis -- ##
+if  st.session_state.data_loaded == True:
+    # --- Tabs ---
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Gains", "Stock Updates", "Export Data",  "Stock Analysis", "AI Recommendation", "Potential Investments"])
 
     #### ----- Tab 1: Gains ----- ####
     with tab1:
@@ -48,23 +52,28 @@ if  st.session_state.data_loaded == True:
             if ccy == 'EUR':
                 fx_cache[ccy] = 1.0  # no conversion needed
             else:
-                fx_cache[ccy] = get_fx_rate(ccy)
-            
+                fx_cache[ccy] = get_fx_rate(ccy) # Fetch and cache FX rate for other currencies
+        
+        # Define a function to get the latest price in EUR
         def get_price_eur(row) -> float:
             """
             Fetch Yahoo price in native currency and convert to EUR.
             """
             try:
+                # Get the most recent closing price from Yahoo Finance
                 price_native = (
                     yf.Ticker(row['Ticker'])
                     .history(period="1d")['Close']
                     .iloc[-1]
                 )
-                fx_rate = fx_cache.get(row['Currency Yahoo'], 1.0)  # default 1.0
+                 # Get the FX rate from the cache (default to 1.0 if missing)
+                fx_rate = fx_cache.get(row['Currency Yahoo'], 1.0) 
+                # Convert the price to EUR
                 return price_native * fx_rate
             except Exception as e:
-                print(f"Error fetching {row['Ticker']}: {e}")   
+                st.error(f"Error fetching {row['Ticker']}: {e}")   
                 return np.nan
+
 
         # --- CALCULATIONS ---------------------------------------------
         today = date.today()
@@ -102,7 +111,7 @@ if  st.session_state.data_loaded == True:
         st.dataframe(report.style.format(precision=2))
 
 
-    ### --- Tab 2: Stock Updates ---
+    #### ----- Tab 2: Asset Updates ----- ####
     with tab2:
         # --- Any asset to update ---
         update = st.radio("Do you have any assets to update?", ("No", "Yes"), horizontal=True)
@@ -183,16 +192,58 @@ if  st.session_state.data_loaded == True:
                 else:
                     st.error("❌ Please fill in all fields with valid values.")
 
+        # if the analyze button is clicked, we start the stock analysis
         if st.button('Analyze'):
-            flag = True
+            st.session_state.flag = True
 
 
-    ### Tab 3: Stock Analysis
+    #### ----- Tab 3: Export Data ----- ####
     with tab3:
+        if st.session_state.flag == True:
+            selected_df = st.session_state.df[['Asset', 'Ticker', 'Units', 'Purchase Price', 'Currency Purchase', 'Currency Yahoo', 'Price Last Update',
+                                            'Date Last Update', 'Value Last Update', 'Profit Last Update']]
+            
+
+            ## -- Update Data --
+            # current price (EUR)
+            selected_df['Price Last Update'] = selected_df.apply(get_price_eur, axis=1)
+
+            # current date
+            today = date.today().strftime('%Y-%m-%d')
+            selected_df['Date Last Update'] = today
+
+            # current value
+            selected_df['Value Last Update'] = selected_df['Units'] * selected_df['Price Last Update']
+
+            # current profit (current value - original value)
+            selected_df['original_value'] = selected_df['Units'] * selected_df['Purchase Price']
+            selected_df['Profit Last Update'] = selected_df['Value Last Update'] - selected_df['original_value']
+
+            selected_df.drop(columns=['original_value'], inplace=True)
+
+            # show df
+            st.dataframe(selected_df)
+
+            # Convert DataFrame to CSV
+            csv = selected_df.to_csv(index=False).encode('utf-8')
+
+            # Download button
+            st.download_button(
+                label="📥 Download Updated Assets",
+                data=csv,
+                file_name=f"assets {today}.csv",
+                mime='text/csv'
+            )
+
+            st.session_state.flag = True
+
+
+    #### ----- Tab 4: Stock Analysis ----- ####
+    with tab4:
         # --- Subtabs ---
         subtab1, subtab2, subtab3, subtab4, subtab5, subtab6, subtab7 = st.tabs(["Moving Averages", "Volatility", "P/E Ratio", "Beta", "Sharpe Ratio", "RSI", "MACD"])
 
-        if flag == True:
+        if st.session_state.flag == True:
             ## --- Moving Averages ---
             with subtab1:
                 st.markdown('### 📈 Moving Averages')
@@ -200,6 +251,7 @@ if  st.session_state.data_loaded == True:
                 for ticker in st.session_state.df['Ticker']:
                     hist = compute_moving_averages(ticker, True)
                     if hist is not None:
+                         # show charts
                         plot_moving_averages(hist, ticker)
             
             ## --- Volatility ---
@@ -222,10 +274,11 @@ if  st.session_state.data_loaded == True:
                             "price_history": hist
                         }
 
+                # show charts
                 plot_volatility_bar_chart(volatility_results) 
                 
             
-            ## -- P/E Ratio --
+            ## --- P/E Ratio ---
             with subtab3:
                 st.markdown('### 💰 P/E Ratios Across Portfolio')
 
@@ -246,9 +299,10 @@ if  st.session_state.data_loaded == True:
                         st.error(f"❌ Error fetching P/E for {ticker}: {e}")
                         pe_ratios[ticker] = np.nan
                 
+                # show charts
                 plot_pe_bar_chart(pe_ratios)
         
-            ## -- BETA --
+            ## --- BETA ---
             with subtab4:
                 st.markdown('### 📊 Beta Values Across Portfolio')
 
@@ -269,9 +323,11 @@ if  st.session_state.data_loaded == True:
                         st.error(f"❌ Error fetching Beta for {ticker}: {e}")
                         beta_values[ticker] = np.nan
 
+                # show charts
                 plot_beta_bar_chart(beta_values)
             
-            ## -- Sharpe Ratio --
+
+            ## --- Sharpe Ratio ---
             with subtab5:
                 st.markdown('### 📊 Sharpe Ratios Across Portfolio')
 
@@ -305,8 +361,11 @@ if  st.session_state.data_loaded == True:
                         st.error(f"⚠ Error computing Sharpe for {ticker}: {e}")
                         sharpe_ratios[ticker] = np.nan
 
+                # show charts
                 plot_sharpe_ratios(sharpe_ratios)
 
+
+            ## --- RSI ---
             with subtab6:
                 st.markdown('### 🔄 RSI (14-day) Across Portfolio')
 
@@ -316,7 +375,7 @@ if  st.session_state.data_loaded == True:
                     try:
                         hist = yf.Ticker(ticker).history(period="3mo")
                         if hist.empty:
-                            print(f"⚠ No price data for {ticker}.")
+                            st.warn(f"⚠ No price data for {ticker}.")
                             rsi_values[ticker] = np.nan
                             continue
 
@@ -331,8 +390,11 @@ if  st.session_state.data_loaded == True:
                         st.error(f"⚠ Error computing RSI for {ticker}: {e}")
                         rsi_values[ticker] = np.nan
 
+                # show charts
                 plot_rsi_values(rsi_values)
-            
+        
+
+            ## --- MACD ---
             with subtab7:
                 st.markdown('### 📊 MACD Crossover Signals (Latest)')
 
@@ -362,69 +424,182 @@ if  st.session_state.data_loaded == True:
                         st.error(f"⚠ Error computing MACD for {ticker}: {e}")
                         macd_crossovers[ticker] = None
                 
+                # show charts
                 plot_macd_crossover(macd_crossovers)
         
     
-
-    with tab4:
-        if flag == True:
+    #### ----- Tab 5: AI Recommendations ----- ####
+    with tab5:
+        if st.session_state.flag == True:
             st.markdown("### 🤖 Personalized AI Recommendation")
+            with st.spinner('Analyzing...'):
 
-            llm = ChatOpenAI(
-                model="gpt-4.1",
-                temperature=0)
+                llm = ChatOpenAI(
+                    model="gpt-4.1",
+                    temperature=0)
+                
+                # Combine all KPI dictionaries into a single DataFrame
+                kpi_df = pd.DataFrame({
+                    'Ticker': st.session_state.df['Ticker'],
+                    'Asset': st.session_state.df['Asset'],
+                    'Price Today': st.session_state.df['Price Today (EUR)'],
+                    'MA-50': [compute_moving_averages(t, False)['Close'].rolling(50).mean().iloc[-1] for t in st.session_state.df['Ticker']],
+                    'MA-100': [compute_moving_averages(t,False)['Close'].rolling(100).mean().iloc[-1] for t in st.session_state.df['Ticker']],
+                    'MA-200': [compute_moving_averages(t,False)['Close'].rolling(200).mean().iloc[-1] for t in st.session_state.df['Ticker']],
+                    'Volatility (30d)': [volatility_results[t]['latest_vol'] for t in st.session_state.df['Ticker']],
+                    'P/E Ratio': [pe_ratios.get(t, np.nan) for t in st.session_state.df['Ticker']],
+                    'Beta': [beta_values.get(t, np.nan) for t in st.session_state.df['Ticker']],
+                    'Sharpe Ratio': [sharpe_ratios.get(t, np.nan) for t in st.session_state.df['Ticker']],
+                    'RSI': [rsi_values.get(t, np.nan) for t in st.session_state.df['Ticker']],
+                    'MACD Crossover': [macd_crossovers.get(t, {}).get('Crossover', 'N/A') for t in st.session_state.df['Ticker']]
+                })
+                
+                # Analysis with GPT
+                messages = [
+                    (
+                        "system",
+                        """
+                        You are a portfolio analyst.
+
+                        For every ticker:
+                        • Summarise key strengths & risks based on MA vs price, volatility, P/E, Beta, Sharpe, RSI, MACD.
+                        • Flag momentum signals: RSI (>70 overbought, <30 oversold) and MACD crossovers.
+                        • Recommend: 'Buy', 'Hold', or 'Reduce', with 1–2 line rationale.
+
+                        Finish with a brief overall portfolio note.
+                        Return the answer in a markdown format, without specifying it is markdown.
+                        """,
+                    ),
+                    ("human", kpi_df.to_string()
+                ),
+                ]
+
+                ai_msg = llm.invoke(messages)
             
-            # Combine all KPI dictionaries into a single DataFrame
-            kpi_df = pd.DataFrame({
-                'Ticker': st.session_state.df['Ticker'],
-                'Asset': st.session_state.df['Asset'],
-                'Price Today': st.session_state.df['Price Today (EUR)'],
-                'MA-50': [compute_moving_averages(t, False)['Close'].rolling(50).mean().iloc[-1] for t in st.session_state.df['Ticker']],
-                'MA-100': [compute_moving_averages(t,False)['Close'].rolling(100).mean().iloc[-1] for t in st.session_state.df['Ticker']],
-                'MA-200': [compute_moving_averages(t,False)['Close'].rolling(200).mean().iloc[-1] for t in st.session_state.df['Ticker']],
-                'Volatility (30d)': [volatility_results[t]['latest_vol'] for t in st.session_state.df['Ticker']],
-                'P/E Ratio': [pe_ratios.get(t, np.nan) for t in st.session_state.df['Ticker']],
-                'Beta': [beta_values.get(t, np.nan) for t in st.session_state.df['Ticker']],
-                'Sharpe Ratio': [sharpe_ratios.get(t, np.nan) for t in st.session_state.df['Ticker']],
-                'RSI': [rsi_values.get(t, np.nan) for t in st.session_state.df['Ticker']],
-                'MACD Crossover': [macd_crossovers.get(t, {}).get('Crossover', 'N/A') for t in st.session_state.df['Ticker']]
-            })
-
+             # show the KPI
             st.write('Portfolio Summary')
             st.dataframe(kpi_df)
-
-            messages = [
-                (
-                    "system",
-                    """
-                    You are a portfolio analyst.
-
-                    For every ticker:
-                    • Summarise key strengths & risks based on MA vs price, volatility, P/E, Beta, Sharpe, RSI, MACD.
-                    • Flag momentum signals: RSI (>70 overbought, <30 oversold) and MACD crossovers.
-                    • Recommend: 'Buy', 'Hold', or 'Reduce', with 1–2 line rationale.
-
-                    Finish with a brief overall portfolio note.
-                    Return the answer in a markdown format, without specifying it is markdown.
-                    """,
-                ),
-                ("human", kpi_df.to_string()
-            ),
-            ]
-
-            ai_msg = llm.invoke(messages)
+            # show analysis
             st.markdown(ai_msg.content)
 
-    with tab5:
-        if flag == True:
-            st.dataframe(st.session_state.df)
-            # Convert DataFrame to CSV
-            csv = st.session_state.df.to_csv(index=False).encode('utf-8')
 
-            # Download button
-            st.download_button(
-                label="📥 Download Updated Assets",
-                data=csv,
-                file_name=f"assets {date.today().strftime('%Y-%m-%d')}.csv",
-                mime='text/csv'
-            )
+    #### ----- Tab 6: New Potential Stock Analysis  ----- ####
+    with tab6:
+        if st.session_state.flag == True:
+            with st.spinner('Analyzing...'):
+                # --- New tickers to analyze ----------------------------------------
+                new_tickers = ['AMZN', 'GOOGL', 'META', 'NVDA', 'TSLA']
+
+                # Create placeholder dictionaries for KPI results
+                new_volatility_results = {}
+                new_pe_ratios = {}
+                new_beta_values = {}
+                new_sharpe_ratios = {}
+                new_rsi_values = {}
+                new_macd_crossovers = {}
+
+                # --- Compute KPIs for each new ticker -----------------------------
+                for ticker in new_tickers:
+
+                    # Volatility
+                    result = compute_volatility(ticker)
+                    if result:
+                        latest_vol, rolling_vol, hist = result
+                        new_volatility_results[ticker] = {
+                            "latest_vol": latest_vol,
+                            "rolling_vol": rolling_vol,
+                            "price_history": hist
+                        }
+
+                    # P/E Ratio
+                    try:
+                        info = yf.Ticker(ticker).info
+                        pe = info.get('trailingPE', np.nan)
+                        new_pe_ratios[ticker] = pe
+                    except Exception:
+                        new_pe_ratios[ticker] = np.nan
+
+                    # Beta
+                    try:
+                        beta = info.get('beta', np.nan)
+                        new_beta_values[ticker] = beta
+                    except Exception:
+                        new_beta_values[ticker] = np.nan
+
+                    # Sharpe Ratio
+                    try:
+                        hist = yf.Ticker(ticker).history(period="1y")
+                        daily_returns = hist['Close'].pct_change().dropna()
+                        avg_daily_return = daily_returns.mean()
+                        annualized_return = avg_daily_return * 252
+                        volatility = daily_returns.std() * np.sqrt(252)
+                        sharpe = (annualized_return - risk_free_rate) / volatility if volatility != 0 else np.nan
+                        new_sharpe_ratios[ticker] = sharpe
+                    except Exception:
+                        new_sharpe_ratios[ticker] = np.nan
+
+                    # RSI
+                    try:
+                        close_prices = hist['Close']
+                        rsi_series = compute_rsi(close_prices)
+                        latest_rsi = rsi_series.iloc[-1]
+                        new_rsi_values[ticker] = latest_rsi
+                    except Exception:
+                        new_rsi_values[ticker] = np.nan
+
+                    # MACD
+                    try:
+                        macd_val, signal_val, crossover = compute_macd(close_prices)
+                        new_macd_crossovers[ticker] = {
+                            "MACD": macd_val,
+                            "Signal": signal_val,
+                            "Crossover": crossover
+                        }
+                    except Exception:
+                        new_macd_crossovers[ticker] = None
+                
+                # Combine your portfolio and new tickers into one KPI DataFrame
+                combined_kpi_df = pd.DataFrame({
+                    'Ticker': list(st.session_state.df['Ticker']) + new_tickers,
+                    'Asset': list(st.session_state.df['Asset']) + new_tickers,  # using ticker as asset name for new ones
+                    'Price Today': list(st.session_state.df['Price Today (EUR)']) + [
+                        yf.Ticker(t).history(period="1d")['Close'].iloc[-1] for t in new_tickers
+                    ],
+                    'Volatility (30d)': [volatility_results[t]['latest_vol'] for t in st.session_state.df['Ticker']] +
+                                        [new_volatility_results[t]['latest_vol'] for t in new_tickers],
+                    'P/E Ratio': [pe_ratios.get(t, np.nan) for t in st.session_state.df['Ticker']] +
+                                [new_pe_ratios.get(t, np.nan) for t in new_tickers],
+                    'Beta': [beta_values.get(t, np.nan) for t in st.session_state.df['Ticker']] +
+                            [new_beta_values.get(t, np.nan) for t in new_tickers],
+                    'Sharpe Ratio': [sharpe_ratios.get(t, np.nan) for t in st.session_state.df['Ticker']] +
+                                    [new_sharpe_ratios.get(t, np.nan) for t in new_tickers],
+                    'RSI': [rsi_values.get(t, np.nan) for t in st.session_state.df['Ticker']] +
+                        [new_rsi_values.get(t, np.nan) for t in new_tickers],
+                    'MACD Crossover': [macd_crossovers.get(t, {}).get('Crossover', 'N/A') for t in st.session_state.df['Ticker']] +
+                                    [new_macd_crossovers.get(t, {}).get('Crossover', 'N/A') for t in new_tickers]
+                })
+
+
+                # Analysis by GPT
+                adjustment_instruction = """
+                You are a portfolio strategist.
+
+                1. Review my current portfolio KPIs and the additional stocks analyzed.
+                2. Suggest portfolio adjustments:
+                • Which assets to increase, reduce, or remove.
+                • Whether to include any of the new tickers (AMZN, GOOGL, META, NVDA, TSLA).
+                • Keep recommendations balanced between risk and return.
+
+                Respond in markdown format with clear bullet points.
+                """
+
+                messages = [
+                    ("system", adjustment_instruction),
+                    ("human", combined_kpi_df.to_string())
+                ]
+
+                # Get GPT recommendation
+                ai_response = llm.invoke(messages)
+            
+            # show analysis
+            st.markdown(ai_response.content)

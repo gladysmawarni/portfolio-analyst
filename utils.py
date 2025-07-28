@@ -8,7 +8,7 @@ import plotly.express as px
 
 ## functions
 
-# Fetch FX rate for USD → EUR
+# --- Fetch FX rate for USD → EUR ---------------------------------------
 def get_fx_rate(from_currency: str, to_currency: str = 'EUR') -> float:
     """
     Get live FX rate from Yahoo. Returns 1.0 if from/to are the same.
@@ -34,8 +34,10 @@ def get_history(ticker, period="1y", interval="1d"):
     except Exception as e:
         print(f"⚠ Error fetching history for {ticker}: {e}")
         return None
-    
-# --- Compute moving averages ------------------------------------------
+
+
+# --------------------------- MOVING AVERAGES ------------------------------------------
+# Compute
 def compute_moving_averages(ticker, print):
     """
     Fetch price data and compute 50, 100, 200-day moving averages.
@@ -65,7 +67,7 @@ def compute_moving_averages(ticker, print):
 
     return hist
 
-## plot moving averages for streamlit
+# Plot
 def plot_moving_averages(hist, ticker):
     """
     Interactive Plotly version for Streamlit.
@@ -91,6 +93,10 @@ def plot_moving_averages(hist, ticker):
 
     st.plotly_chart(fig, use_container_width=True)
 
+
+
+# --------------------------- VOLATILITY ------------------------------------------
+# Compute
 def compute_volatility(ticker, window=30):
     """
     Calculate rolling volatility (% annualized) for a ticker.
@@ -112,7 +118,7 @@ def compute_volatility(ticker, window=30):
 
     return latest_vol, rolling_vol, hist
 
-
+# Plot
 def plot_volatility_bar_chart(volatility_results):
     """
     Plots an interactive bar chart of the latest volatilities using Plotly in Streamlit.
@@ -137,6 +143,8 @@ def plot_volatility_bar_chart(volatility_results):
     st.plotly_chart(fig, use_container_width=True)
 
 
+# --------------------------- P/E RATIO ------------------------------------------
+# Plot
 def plot_pe_bar_chart(pe_ratios):
     """
     Display a Plotly bar chart of P/E ratios for valid tickers in Streamlit.
@@ -176,7 +184,8 @@ def plot_pe_bar_chart(pe_ratios):
         st.warning("⚠ No valid P/E ratios to display.")
 
 
-
+# --------------------------- BETA ------------------------------------------
+# Plot
 def plot_beta_bar_chart(beta_values):
     """
     Display a Plotly bar chart of Beta values with a market beta reference line.
@@ -236,6 +245,8 @@ def plot_beta_bar_chart(beta_values):
         st.warning("⚠ No valid Beta values to display.")
 
 
+# --------------------------- SHARPE RATIO ------------------------------------------
+# Plot
 def plot_sharpe_ratios(sharpe_ratios):
     """
     Plots an interactive bar chart of Sharpe Ratios using Plotly in Streamlit.
@@ -269,6 +280,8 @@ def plot_sharpe_ratios(sharpe_ratios):
         st.warning("⚠ No valid Sharpe ratios to display.")
 
 
+# --------------------------- RSI ------------------------------------------
+# Compute
 def compute_rsi(series, period=14):
     """
     Compute RSI (Relative Strength Index) for a price series.
@@ -284,7 +297,7 @@ def compute_rsi(series, period=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-
+# Plot
 def plot_rsi_values(rsi_values):
     """
     Plots an interactive bar chart of RSI values using Plotly in Streamlit.
@@ -323,6 +336,8 @@ def plot_rsi_values(rsi_values):
         st.warning("⚠ No valid RSI values to display.")
 
 
+# --------------------------- MACD ------------------------------------------
+# Compute
 def compute_macd(series, slow=26, fast=12, signal=9):
     """
     Compute MACD line and Signal line, detect crossover.
@@ -339,7 +354,7 @@ def compute_macd(series, slow=26, fast=12, signal=9):
 
     return last_macd, last_signal, crossover
 
-
+# Plot
 def plot_macd_crossover(macd_crossovers):
     """
     Plots an interactive bar chart of MACD crossover signals using Plotly in Streamlit.
