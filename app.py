@@ -493,9 +493,12 @@ if  st.session_state.data_loaded == True:
                     label_visibility='visible'
                 )
 
-            if st.button('Submit') and text_input.strip():
+            if st.button('Submit') or text_input.strip():
                 with st.spinner('Analyzing...'):
+                    # split input by commas
                     new_tickers = [ticker.strip() for ticker in text_input.split(',')]
+                    # list to save not valid tickers
+                    not_valid_tickers = []
 
                     # Create placeholder dictionaries for KPI results
                     new_volatility_results = {}
@@ -511,7 +514,8 @@ if  st.session_state.data_loaded == True:
                         stock = yf.Ticker(ticker)
 
                         info = stock.info
-                        if "shortName" in info:
+
+                        if "regularMarketDayRange" in info:
                             # Volatility
                             result = compute_volatility(ticker)
                             if result:
@@ -571,9 +575,11 @@ if  st.session_state.data_loaded == True:
                         
                         else:
                             st.error(f'❌ No information for ticker: {ticker}.')
-                            new_tickers.remove(ticker)
+                            not_valid_tickers.append(ticker)
+                            
 
                     # valid tickers
+                    new_tickers = [x for x in new_tickers if x not in not_valid_tickers]
                     st.write(f"Analyzing the following assets: {', '.join(new_tickers)}")
 
                     # Combine your portfolio and new tickers into one KPI DataFrame
