@@ -486,120 +486,138 @@ if  st.session_state.data_loaded == True:
     #### ----- Tab 6: New Potential Stock Analysis  ----- ####
     with tab6:
         if st.session_state.flag == True:
-            with st.spinner('Analyzing...'):
-                # --- New tickers to analyze ----------------------------------------
-                new_tickers = ['AMZN', 'GOOGL', 'META', 'NVDA', 'TSLA']
+            # --- New tickers to analyze ----------------------------------------
+            text_input = st.text_input(
+                    label="🆕 Enter Ticker Symbols for New Stocks",
+                    placeholder="e.g. NVDA, TSLA, AAPL (separate with commas)",
+                    label_visibility='visible'
+                )
 
-                # Create placeholder dictionaries for KPI results
-                new_volatility_results = {}
-                new_pe_ratios = {}
-                new_beta_values = {}
-                new_sharpe_ratios = {}
-                new_rsi_values = {}
-                new_macd_crossovers = {}
+            if st.button('Submit') and text_input.strip():
+                with st.spinner('Analyzing...'):
+                    new_tickers = [ticker.strip() for ticker in text_input.split(',')]
 
-                # --- Compute KPIs for each new ticker -----------------------------
-                for ticker in new_tickers:
+                    # Create placeholder dictionaries for KPI results
+                    new_volatility_results = {}
+                    new_pe_ratios = {}
+                    new_beta_values = {}
+                    new_sharpe_ratios = {}
+                    new_rsi_values = {}
+                    new_macd_crossovers = {}
 
-                    # Volatility
-                    result = compute_volatility(ticker)
-                    if result:
-                        latest_vol, rolling_vol, hist = result
-                        new_volatility_results[ticker] = {
-                            "latest_vol": latest_vol,
-                            "rolling_vol": rolling_vol,
-                            "price_history": hist
-                        }
+                    # --- Compute KPIs for each new ticker -----------------------------
+                    for ticker in new_tickers:
+                        ## check if ticker is valid
+                        stock = yf.Ticker(ticker)
 
-                    # P/E Ratio
-                    try:
-                        info = yf.Ticker(ticker).info
-                        pe = info.get('trailingPE', np.nan)
-                        new_pe_ratios[ticker] = pe
-                    except Exception:
-                        new_pe_ratios[ticker] = np.nan
+                        info = stock.info
+                        if "shortName" in info:
+                            # Volatility
+                            result = compute_volatility(ticker)
+                            if result:
+                                latest_vol, rolling_vol, hist = result
+                                new_volatility_results[ticker] = {
+                                    "latest_vol": latest_vol,
+                                    "rolling_vol": rolling_vol,
+                                    "price_history": hist
+                                }
 
-                    # Beta
-                    try:
-                        beta = info.get('beta', np.nan)
-                        new_beta_values[ticker] = beta
-                    except Exception:
-                        new_beta_values[ticker] = np.nan
+                            # P/E Ratio
+                            try:
+                                info = yf.Ticker(ticker).info
+                                pe = info.get('trailingPE', np.nan)
+                                new_pe_ratios[ticker] = pe
+                            except Exception:
+                                new_pe_ratios[ticker] = np.nan
 
-                    # Sharpe Ratio
-                    try:
-                        hist = yf.Ticker(ticker).history(period="1y")
-                        daily_returns = hist['Close'].pct_change().dropna()
-                        avg_daily_return = daily_returns.mean()
-                        annualized_return = avg_daily_return * 252
-                        volatility = daily_returns.std() * np.sqrt(252)
-                        sharpe = (annualized_return - risk_free_rate) / volatility if volatility != 0 else np.nan
-                        new_sharpe_ratios[ticker] = sharpe
-                    except Exception:
-                        new_sharpe_ratios[ticker] = np.nan
+                            # Beta
+                            try:
+                                beta = info.get('beta', np.nan)
+                                new_beta_values[ticker] = beta
+                            except Exception:
+                                new_beta_values[ticker] = np.nan
 
-                    # RSI
-                    try:
-                        close_prices = hist['Close']
-                        rsi_series = compute_rsi(close_prices)
-                        latest_rsi = rsi_series.iloc[-1]
-                        new_rsi_values[ticker] = latest_rsi
-                    except Exception:
-                        new_rsi_values[ticker] = np.nan
+                            # Sharpe Ratio
+                            try:
+                                hist = yf.Ticker(ticker).history(period="1y")
+                                daily_returns = hist['Close'].pct_change().dropna()
+                                avg_daily_return = daily_returns.mean()
+                                annualized_return = avg_daily_return * 252
+                                volatility = daily_returns.std() * np.sqrt(252)
+                                sharpe = (annualized_return - risk_free_rate) / volatility if volatility != 0 else np.nan
+                                new_sharpe_ratios[ticker] = sharpe
+                            except Exception:
+                                new_sharpe_ratios[ticker] = np.nan
 
-                    # MACD
-                    try:
-                        macd_val, signal_val, crossover = compute_macd(close_prices)
-                        new_macd_crossovers[ticker] = {
-                            "MACD": macd_val,
-                            "Signal": signal_val,
-                            "Crossover": crossover
-                        }
-                    except Exception:
-                        new_macd_crossovers[ticker] = None
+                            # RSI
+                            try:
+                                close_prices = hist['Close']
+                                rsi_series = compute_rsi(close_prices)
+                                latest_rsi = rsi_series.iloc[-1]
+                                new_rsi_values[ticker] = latest_rsi
+                            except Exception:
+                                new_rsi_values[ticker] = np.nan
+
+                            # MACD
+                            try:
+                                macd_val, signal_val, crossover = compute_macd(close_prices)
+                                new_macd_crossovers[ticker] = {
+                                    "MACD": macd_val,
+                                    "Signal": signal_val,
+                                    "Crossover": crossover
+                                }
+                            except Exception:
+                                new_macd_crossovers[ticker] = None
+                        
+                        else:
+                            st.error(f'❌ No information for ticker: {ticker}.')
+                            new_tickers.remove(ticker)
+
+                    # valid tickers
+                    st.write(f"Analyzing the following assets: {', '.join(new_tickers)}")
+
+                    # Combine your portfolio and new tickers into one KPI DataFrame
+                    combined_kpi_df = pd.DataFrame({
+                        'Ticker': list(st.session_state.df['Ticker']) + new_tickers,
+                        'Asset': list(st.session_state.df['Asset']) + new_tickers,  # using ticker as asset name for new ones
+                        'Price Today': list(st.session_state.df['Price Today (EUR)']) + [
+                            yf.Ticker(t).history(period="1d")['Close'].iloc[-1] for t in new_tickers
+                        ],
+                        'Volatility (30d)': [volatility_results[t]['latest_vol'] for t in st.session_state.df['Ticker']] +
+                                            [new_volatility_results[t]['latest_vol'] for t in new_tickers],
+                        'P/E Ratio': [pe_ratios.get(t, np.nan) for t in st.session_state.df['Ticker']] +
+                                    [new_pe_ratios.get(t, np.nan) for t in new_tickers],
+                        'Beta': [beta_values.get(t, np.nan) for t in st.session_state.df['Ticker']] +
+                                [new_beta_values.get(t, np.nan) for t in new_tickers],
+                        'Sharpe Ratio': [sharpe_ratios.get(t, np.nan) for t in st.session_state.df['Ticker']] +
+                                        [new_sharpe_ratios.get(t, np.nan) for t in new_tickers],
+                        'RSI': [rsi_values.get(t, np.nan) for t in st.session_state.df['Ticker']] +
+                            [new_rsi_values.get(t, np.nan) for t in new_tickers],
+                        'MACD Crossover': [macd_crossovers.get(t, {}).get('Crossover', 'N/A') for t in st.session_state.df['Ticker']] +
+                                        [new_macd_crossovers.get(t, {}).get('Crossover', 'N/A') for t in new_tickers]
+                    })
+
+
+                    # Analysis by GPT
+                    adjustment_instruction = f"""
+                    You are a portfolio strategist.
+
+                    1. Review my current portfolio KPIs and the additional stocks analyzed.
+                    2. Suggest portfolio adjustments:
+                    • Which assets to increase, reduce, or remove.
+                    • Whether to include any of the new tickers ({', '.join(new_tickers)}).
+                    • Keep recommendations balanced between risk and return.
+
+                    Respond in markdown format with clear bullet points.
+                    """
+
+                    messages = [
+                        ("system", adjustment_instruction),
+                        ("human", combined_kpi_df.to_string())
+                    ]
+
+                    # Get GPT recommendation
+                    ai_response = llm.invoke(messages)
                 
-                # Combine your portfolio and new tickers into one KPI DataFrame
-                combined_kpi_df = pd.DataFrame({
-                    'Ticker': list(st.session_state.df['Ticker']) + new_tickers,
-                    'Asset': list(st.session_state.df['Asset']) + new_tickers,  # using ticker as asset name for new ones
-                    'Price Today': list(st.session_state.df['Price Today (EUR)']) + [
-                        yf.Ticker(t).history(period="1d")['Close'].iloc[-1] for t in new_tickers
-                    ],
-                    'Volatility (30d)': [volatility_results[t]['latest_vol'] for t in st.session_state.df['Ticker']] +
-                                        [new_volatility_results[t]['latest_vol'] for t in new_tickers],
-                    'P/E Ratio': [pe_ratios.get(t, np.nan) for t in st.session_state.df['Ticker']] +
-                                [new_pe_ratios.get(t, np.nan) for t in new_tickers],
-                    'Beta': [beta_values.get(t, np.nan) for t in st.session_state.df['Ticker']] +
-                            [new_beta_values.get(t, np.nan) for t in new_tickers],
-                    'Sharpe Ratio': [sharpe_ratios.get(t, np.nan) for t in st.session_state.df['Ticker']] +
-                                    [new_sharpe_ratios.get(t, np.nan) for t in new_tickers],
-                    'RSI': [rsi_values.get(t, np.nan) for t in st.session_state.df['Ticker']] +
-                        [new_rsi_values.get(t, np.nan) for t in new_tickers],
-                    'MACD Crossover': [macd_crossovers.get(t, {}).get('Crossover', 'N/A') for t in st.session_state.df['Ticker']] +
-                                    [new_macd_crossovers.get(t, {}).get('Crossover', 'N/A') for t in new_tickers]
-                })
-
-
-                # Analysis by GPT
-                adjustment_instruction = """
-                You are a portfolio strategist.
-
-                1. Review my current portfolio KPIs and the additional stocks analyzed.
-                2. Suggest portfolio adjustments:
-                • Which assets to increase, reduce, or remove.
-                • Whether to include any of the new tickers (AMZN, GOOGL, META, NVDA, TSLA).
-                • Keep recommendations balanced between risk and return.
-
-                Respond in markdown format with clear bullet points.
-                """
-
-                messages = [
-                    ("system", adjustment_instruction),
-                    ("human", combined_kpi_df.to_string())
-                ]
-
-                # Get GPT recommendation
-                ai_response = llm.invoke(messages)
-            
-            # show analysis
-            st.markdown(ai_response.content)
+                # show analysis
+                st.markdown(ai_response.content)
