@@ -435,7 +435,7 @@ if  st.session_state.data_loaded == True:
             with st.spinner('Analyzing...'):
 
                 llm = ChatOpenAI(
-                    model="gpt-4.1",
+                    model="gpt-5-nano",
                     temperature=0)
                 
                 # Combine all KPI dictionaries into a single DataFrame
